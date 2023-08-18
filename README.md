@@ -32,5 +32,5 @@ where <DATASET> is the name of the four datasets.
 
 
 ## Acknowledgment
- - Transformer and training pipeline are implemented based on [S3-Rec](https://github.com/RUCAIBox/CIKM2020-S3Rec) [ICLRec](https://github.com/salesforce/ICLRec). Thanks them for providing efficient implementation.
+ - Transformer and training pipeline are implemented based on [S3-Rec](https://github.com/RUCAIBox/CIKM2020-S3Rec) and [ICLRec](https://github.com/salesforce/ICLRec). Thanks them for providing efficient implementation.
 
