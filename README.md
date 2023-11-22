@@ -1,5 +1,5 @@
-# APGL4SR: A Generic Framework with Adaptive and Personalized Global Collaborative Information in Sequential Recommendation (CIKM'2023) [Paper Link](https://dl.acm.org/doi/abs/10.1145/3583780.3614781)
-Source code for paper: [APGL4SR: A Generic Framework with Adaptive and Personalized Global Collaborative Information in Sequential Recommendation (CIKM'2023)]
+# APGL4SR: A Generic Framework with Adaptive and Personalized Global Collaborative Information in Sequential Recommendation (CIKM'2023) 
+Source code for paper: [APGL4SR: A Generic Framework with Adaptive and Personalized Global Collaborative Information in Sequential Recommendation (CIKM'2023)](https://dl.acm.org/doi/abs/10.1145/3583780.3614781)
 
 ## Introduction
 We incorporate adaptive and peronalized global collaborative information into sequential recommendation with the proposed APGL4SR framework.
@@ -35,7 +35,7 @@ cd src
 chmod +x ./scripts/run_<DATASET>.sh
 ./scripts/run_<DATASET>.sh
 ```
-where <DATASET> is the name of the four datasets.
+where \<DATASET\> is the name of the four datasets.
 
 
 ## Acknowledgment
