@@ -84,10 +84,9 @@ def main():
     )
     parser.add_argument(
         "--num_intent_clusters",
-        default="256",
+        default="1",
         type=str,
-        help="Number of cluster of intents. Activated only when using \
-                        IntentCL or Hybrid types.",
+        help="NOT USED.",
     )
     parser.add_argument(
         "--seq_representation_type",
@@ -136,7 +135,6 @@ def main():
     parser.add_argument("--seed", default=1, type=int)
     parser.add_argument("--cf_weight", type=float, default=0.1, help="weight of contrastive learning task")
     parser.add_argument("--rec_weight", type=float, default=1.0, help="weight of contrastive learning task")
-    parser.add_argument("--intent_cf_weight", type=float, default=0., help="weight of contrastive learning task")
     parser.add_argument("--gcl_weight", type=float, default=0.1, help="weight of graph contrastive learning task")
 
     # learning related

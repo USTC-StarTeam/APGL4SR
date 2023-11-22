@@ -22,7 +22,8 @@ If you find our article or implemented codes helpful, please kindly cite our wor
 Python >= 3.7  
 Pytorch >= 1.2.0  
 tqdm == 4.26.0 
-faiss-gpu==1.7.1
+faiss-gpu == 1.7.1
+nni == 2.10
 
 ### Datasets
 Four prepared datasets are included in `data` folder.

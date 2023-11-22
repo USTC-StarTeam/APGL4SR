@@ -17,7 +17,7 @@ from torch.utils.data import DataLoader, RandomSampler
 
 from models import KMeans
 from datasets import RecWithContrastiveLearningDataset
-from modules import NCELoss, NTXent, SupConLoss, PCLoss
+from modules import NCELoss, NTXent, PCLoss
 from utils import recall_at_k, ndcg_k, get_metric, get_user_seqs, nCr
 
 
@@ -251,35 +251,6 @@ class ICLRecTrainer(Trainer):
         # Setting the tqdm progress bar
 
         if train:
-            # ------ intentions clustering ----- #
-            if self.args.contrast_type in ["IntentCL", "Hybrid"] and epoch >= self.args.warm_up_epoches and cluster_dataloader != None and self.args.intent_cf_weight > 0:
-                print("Preparing Clustering:")
-                self.model.eval()
-                kmeans_training_data = []
-                rec_cf_data_iter = tqdm(enumerate(cluster_dataloader), total=len(cluster_dataloader))
-                for i, (rec_batch, _, _) in rec_cf_data_iter:
-                    rec_batch = tuple(t.to(self.device) for t in rec_batch)
-                    _, input_ids, target_pos, target_neg, _ = rec_batch
-                    sequence_output = self.model(input_ids)
-                    # average sum
-                    if self.args.seq_representation_type == "mean":
-                        sequence_output = torch.mean(sequence_output, dim=1, keepdim=False)
-                    sequence_output = sequence_output.view(sequence_output.shape[0], -1)
-                    sequence_output = sequence_output.detach().cpu().numpy()
-                    kmeans_training_data.append(sequence_output)
-                kmeans_training_data = np.concatenate(kmeans_training_data, axis=0)
-
-                # train multiple clusters
-                print("Training Clusters:")
-                for i, cluster in tqdm(enumerate(self.clusters), total=len(self.clusters)):
-                    cluster.train(kmeans_training_data)
-                    self.clusters[i] = cluster
-                # clean memory
-                del kmeans_training_data
-                import gc
-
-                gc.collect()
-
             # ------ model training -----#
             print("Performing Rec model Training:")
             self.model.train()
@@ -308,34 +279,7 @@ class ICLRecTrainer(Trainer):
                 # ---------- contrastive learning task -------------#
                 cl_losses = []
                 for cl_batch in cl_batches:
-                    if self.args.contrast_type == "InstanceCL":
-                        cl_loss = self._instance_cl_one_pair_contrastive_learning(
-                            cl_batch, intent_ids=seq_class_label_batches
-                        )
-                        cl_losses.append(self.args.cf_weight * cl_loss)
-                    elif self.args.contrast_type == "IntentCL":
-                        # ------ performing clustering for getting users' intentions ----#
-                        # average sum
-                        if epoch >= self.args.warm_up_epoches:
-                            if self.args.seq_representation_type == "mean":
-                                sequence_output = torch.mean(sequence_output, dim=1, keepdim=False)
-                            sequence_output = sequence_output.view(sequence_output.shape[0], -1)
-                            sequence_output = sequence_output.detach().cpu().numpy()
-
-                            # query on multiple clusters
-                            for cluster in self.clusters:
-                                seq2intents = []
-                                intent_ids = []
-                                intent_id, seq2intent = cluster.query(sequence_output)
-                                seq2intents.append(seq2intent)
-                                intent_ids.append(intent_id)
-                            cl_loss = self._pcl_one_pair_contrastive_learning(
-                                cl_batch, intents=seq2intents, intent_ids=intent_ids
-                            )
-                            cl_losses.append(self.args.intent_cf_weight * cl_loss)
-                        else:
-                            continue
-                    elif self.args.contrast_type == "Hybrid":
+                    if self.args.contrast_type == "Hybrid":
                         if epoch < self.args.warm_up_epoches:
                             cl_loss1 = self._instance_cl_one_pair_contrastive_learning(
                                 cl_batch, intent_ids=seq_class_label_batches
@@ -350,19 +294,6 @@ class ICLRecTrainer(Trainer):
                                 sequence_output = torch.mean(sequence_output, dim=1, keepdim=False)
                             sequence_output = sequence_output.view(sequence_output.shape[0], -1)
                             sequence_output = sequence_output.detach().cpu().numpy()
-
-                            # query on multiple clusters
-                            if self.args.intent_cf_weight > 0:
-                                for cluster in self.clusters:
-                                    seq2intents = []
-                                    intent_ids = []
-                                    intent_id, seq2intent = cluster.query(sequence_output)
-                                    seq2intents.append(seq2intent)
-                                    intent_ids.append(intent_id)
-                                cl_loss3 = self._pcl_one_pair_contrastive_learning(
-                                    cl_batch, intents=seq2intents, intent_ids=intent_ids
-                                )
-                                cl_losses.append(self.args.intent_cf_weight * cl_loss3)
 
                 # graph contrastive loss
                 if self.args.gcl_weight > 0:
