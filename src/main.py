@@ -7,18 +7,18 @@
 #
 
 import os
-import nni
 import numpy as np
 import random
-import torch
+import mindspore
+import mindspore.ops as ops
 import argparse
 
-from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
+from mindspore.dataset import GeneratorDataset
 
-from datasets import RecWithContrastiveLearningDataset
+from datasets import RecWithContrastiveLearningDataset, MyDataloader
 
 from trainers import ICLRecTrainer
-from models import SASRecModel, OfflineItemSimilarity, OnlineItemSimilarity
+from models import SASRecModel
 from utils import EarlyStopping, get_user_seqs, get_item2attribute_json, check_path, set_seed
 
 def show_args_info(args):
@@ -104,7 +104,6 @@ def main():
     )
     parser.add_argument("--warm_up_epoches", type=float, default=0, help="number of epochs to start IntentCL.")
     parser.add_argument("--de_noise", action="store_true", help="whether to de-false negative pairs during learning.")
-    parser.add_argument("--nni", action="store_true", help="whether to use nni")
 
     # model args
     parser.add_argument("--model_name", default="ICLRec", type=str)
@@ -143,19 +142,13 @@ def main():
     parser.add_argument("--adam_beta2", type=float, default=0.999, help="adam second beta value")
 
     args = parser.parse_args()
-    if args.nni:
-        updated_args = nni.get_next_parameter()
-        temp_args = vars(args)
-        temp_args.update(updated_args)
-        args = argparse.Namespace(**temp_args)
-        args.model_idx = nni.get_trial_id()
 
     set_seed(args.seed)
     check_path(args.output_dir)
 
-    os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_id
     args.cuda_condition = True
-    print("Using Cuda:", torch.cuda.is_available())
+    print("Using Cuda:", args.gpu_id)
+    mindspore.set_context(device_id=int(args.gpu_id), device_target='GPU')
     args.data_file = args.data_dir + args.data_name + ".txt"
 
     user_seq, max_item, valid_rating_matrix, test_rating_matrix = get_user_seqs(args.data_file)
@@ -193,22 +186,21 @@ def main():
     train_dataset = RecWithContrastiveLearningDataset(
         args, user_seq[: int(len(user_seq) * args.training_data_ratio)], data_type="train"
     )
-    train_sampler = RandomSampler(train_dataset)
-    train_dataloader = DataLoader(train_dataset, sampler=train_sampler, batch_size=args.batch_size)
+    # column_names = 
+    # train_dataloader = GeneratorDataset(train_dataset, column_names=['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'])
+    train_dataloader = MyDataloader(args, train_dataset, 'train')
 
     eval_dataset = RecWithContrastiveLearningDataset(args, user_seq, data_type="valid")
-    eval_sampler = SequentialSampler(eval_dataset)
-    eval_dataloader = DataLoader(eval_dataset, sampler=eval_sampler, batch_size=args.batch_size)
+    eval_dataloader = GeneratorDataset(eval_dataset, column_names=['test'])
 
     test_dataset = RecWithContrastiveLearningDataset(args, user_seq, data_type="test")
-    test_sampler = SequentialSampler(test_dataset)
-    test_dataloader = DataLoader(test_dataset, sampler=test_sampler, batch_size=args.batch_size)
+    test_dataloader = GeneratorDataset(test_dataset, column_names=['test'])
 
     model = SASRecModel(args=args)
     model.global_graph_construction(train_dataset)
     model.dense_norm_adj = model.norm_adj.to_dense()
-    model.dense_norm_adj = torch.cat([model.dense_norm_adj, torch.zeros(1, model.dense_norm_adj.shape[1])]) # last one is for padding
-    model.dense_norm_adj = torch.cat([model.dense_norm_adj, torch.zeros(model.dense_norm_adj.shape[0], 1)], dim=-1) # last one is for padding
+    model.dense_norm_adj = ops.cat([model.dense_norm_adj, ops.zeros((1, model.dense_norm_adj.shape[1]))]) # last one is for padding
+    model.dense_norm_adj = ops.cat([model.dense_norm_adj, ops.zeros((model.dense_norm_adj.shape[0], 1))], axis=-1) # last one is for padding
     if args.svd:
         model.get_svd()
 
@@ -234,7 +226,7 @@ def main():
         trainer.args.train_matrix = test_rating_matrix
         print("---------------Change to test_rating_matrix!-------------------")
         # load the best model
-        trainer.model.load_state_dict(torch.load(args.checkpoint_path))
+        mindspore.load_param_into_net(trainer.model, mindspore.load_checkpoint(args.checkpoint_path))
         scores, result_info = trainer.test(0, full_sort=True)
 
     print(args_str)

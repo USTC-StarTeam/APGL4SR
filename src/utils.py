@@ -14,20 +14,15 @@ import json
 import pickle
 from scipy.sparse import csr_matrix
 
-import torch
-import torch.nn.functional as F
+import mindspore
+import mindspore.ops as ops
 
 
 def set_seed(seed):
     random.seed(seed)
     os.environ["PYTHONHASHSEED"] = str(seed)
     np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    # some cudnn methods can be random even after fixing the seed
-    # unless you tell it to be deterministic
-    torch.backends.cudnn.deterministic = True
+    mindspore.set_seed(seed)
 
 
 def nCr(n, r):
@@ -98,7 +93,7 @@ class EarlyStopping:
         if self.verbose:
             # ({self.score_min:.6f} --> {score:.6f}) # 这里如果是一个值的话输出才不会有问题
             print(f"Validation score increased.  Saving model ...")
-        torch.save(model.state_dict(), self.checkpoint_path)
+        mindspore.save_checkpoint(model, self.checkpoint_path)
         self.score_min = score
 
 
@@ -108,7 +103,7 @@ def kmax_pooling(x, dim, k):
 
 
 def avg_pooling(x, dim):
-    return x.sum(dim=dim) / x.size(dim)
+    return x.sum(dim=dim) / x.shape[dim]
 
 
 def generate_rating_matrix_valid(user_seq, num_users, num_items):

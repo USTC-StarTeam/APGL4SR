@@ -8,10 +8,8 @@ import random
 import copy
 import itertools
 from typing import Any
-import torch
-import dgl
+import mindspore
 import numpy as np
-from torch.nn.utils.rnn import pad_sequence
 
 class Random(object):
     """Randomly pick one data augmentation type every time call"""

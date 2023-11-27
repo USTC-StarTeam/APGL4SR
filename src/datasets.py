@@ -5,15 +5,18 @@
 # For full license text, see the LICENSE file in the repo root or https://opensource.org/licenses/BSD-3-Clause
 #
 import random
-import torch
-from torch.utils.data import Dataset
+import numpy as np
+import mindspore
+from mindspore.dataset import GeneratorDataset
+import mindspore.ops as ops
+import itertools
 
 from data_augmentation import Crop, Mask, Reorder, Random
 from utils import neg_sample, nCr
 import copy
 
 
-class RecWithContrastiveLearningDataset(Dataset):
+class RecWithContrastiveLearningDataset():
     def __init__(self, args, user_seq, test_neg_items=None, data_type="train", similarity_model_type="offline"):
         self.args = args
         self.user_seq = user_seq
@@ -48,12 +51,12 @@ class RecWithContrastiveLearningDataset(Dataset):
 
             assert len(augmented_input_ids) == self.max_len
 
-            cur_tensors = torch.tensor(augmented_input_ids, dtype=torch.long)
+            cur_tensors = mindspore.tensor(augmented_input_ids)
             augmented_seqs.append(cur_tensors)
         return augmented_seqs
 
     def _process_sequence_label_signal(self, seq_label_signal):
-        seq_class_label = torch.tensor(seq_label_signal, dtype=torch.long)
+        seq_class_label = mindspore.tensor(seq_label_signal)
         return seq_class_label
 
     def _data_sample_rec_task(self, user_id, items, input_ids, target_pos, answer):
@@ -81,22 +84,21 @@ class RecWithContrastiveLearningDataset(Dataset):
             test_samples = self.test_neg_items[index]
 
             cur_rec_tensors = (
-                torch.tensor(user_id, dtype=torch.long),  # user_id for testing
-                torch.tensor(copied_input_ids, dtype=torch.long),
-                torch.tensor(target_pos, dtype=torch.long),
-                torch.tensor(target_neg, dtype=torch.long),
-                torch.tensor(answer, dtype=torch.long),
-                torch.tensor(test_samples, dtype=torch.long),
+                mindspore.tensor(user_id),  # user_id for testing
+                mindspore.tensor(copied_input_ids),
+                mindspore.tensor(target_pos),
+                mindspore.tensor(target_neg),
+                mindspore.tensor(answer),
+                mindspore.tensor(test_samples),
             )
         else:
             cur_rec_tensors = (
-                torch.tensor(user_id, dtype=torch.long),  # user_id for testing
-                torch.tensor(copied_input_ids, dtype=torch.long),
-                torch.tensor(target_pos, dtype=torch.long),
-                torch.tensor(target_neg, dtype=torch.long),
-                torch.tensor(answer, dtype=torch.long),
+                mindspore.tensor(user_id),  # user_id for testing
+                mindspore.tensor(copied_input_ids),
+                mindspore.tensor(target_pos),
+                mindspore.tensor(target_neg),
+                mindspore.tensor(answer),
             )
-
         return cur_rec_tensors
 
     def _add_noise_interactions(self, items):
@@ -164,7 +166,7 @@ class RecWithContrastiveLearningDataset(Dataset):
         return len(self.user_seq)
 
 
-class SASRecDataset(Dataset):
+class SASRecDataset():
     def __init__(self, args, user_seq, test_neg_items=None, data_type="train"):
         self.args = args
         self.user_seq = user_seq
@@ -197,20 +199,20 @@ class SASRecDataset(Dataset):
             test_samples = self.test_neg_items[index]
 
             cur_rec_tensors = (
-                torch.tensor(user_id, dtype=torch.long),  # user_id for testing
-                torch.tensor(input_ids, dtype=torch.long),
-                torch.tensor(target_pos, dtype=torch.long),
-                torch.tensor(target_neg, dtype=torch.long),
-                torch.tensor(answer, dtype=torch.long),
-                torch.tensor(test_samples, dtype=torch.long),
+                mindspore.tensor(user_id),  # user_id for testing
+                mindspore.tensor(input_ids),
+                mindspore.tensor(target_pos),
+                mindspore.tensor(target_neg),
+                mindspore.tensor(answer),
+                mindspore.tensor(test_samples),
             )
         else:
             cur_rec_tensors = (
-                torch.tensor(user_id, dtype=torch.long),  # user_id for testing
-                torch.tensor(input_ids, dtype=torch.long),
-                torch.tensor(target_pos, dtype=torch.long),
-                torch.tensor(target_neg, dtype=torch.long),
-                torch.tensor(answer, dtype=torch.long),
+                mindspore.tensor(user_id),  # user_id for testing
+                mindspore.tensor(input_ids),
+                mindspore.tensor(target_pos),
+                mindspore.tensor(target_neg),
+                mindspore.tensor(answer),
             )
 
         return cur_rec_tensors
@@ -251,73 +253,52 @@ class SASRecDataset(Dataset):
     def __len__(self):
         return len(self.user_seq)
 
+class MyDataloader():
+    def __init__(self, args, dataset, data_type) -> None:
+        self.dataset = dataset
+        self.batch_size = args.batch_size
+        self.num_data = len(self.dataset)
+        self.num_batch = self.num_data // self.batch_size
+        self.batch_idx = np.arange(self.num_data)
+        self.data_type = data_type
+        self.stack = ops.Stack()
 
-if __name__ == "__main__":
-    import argparse
-    from utils import get_user_seqs, set_seed
-    from torch.utils.data import DataLoader, RandomSampler
-    from tqdm import tqdm
+    def __len__(self):
+        return self.num_batch
 
-    parser = argparse.ArgumentParser()
+    @staticmethod
+    def _split_into_batches(lst, batch_size):
+        batches = []
+        for i in range(0, len(lst), batch_size):
+            batch = lst[i:i + batch_size]
+            batches.append(batch)
+        return batches
 
-    parser.add_argument("--data_dir", default="../data/", type=str)
-    parser.add_argument("--output_dir", default="output/", type=str)
-    parser.add_argument("--data_name", default="Beauty", type=str)
-    parser.add_argument("--do_eval", action="store_true")
-    parser.add_argument("--model_idx", default=1, type=int, help="model idenfier 10, 20, 30...")
+    def __iter__(self):
+        self.iter_dataset = iter(self.dataset)
+        random.shuffle(self.batch_idx)
+        self.batch = self._split_into_batches(self.batch_idx, self.batch_size)
+        
+        for index in range(self.num_batch):
+            batched_data_index = self.batch[index]
+            cur_rec_tensors_list, cf_tensors_list, seq_class_label_list = [[], [], [], [], []], [[], []], []
+            for idx in batched_data_index:
+                if self.data_type == 'train':
+                    cur_rec_tensors, cf_tensors, seq_class_label = self.dataset[idx]
+                    user_id, input_ids, target_pos, target_neg, answer = cur_rec_tensors
+                    cur_rec_tensors_list[0].append(user_id)
+                    cur_rec_tensors_list[1].append(input_ids)
+                    cur_rec_tensors_list[2].append(target_pos)
+                    cur_rec_tensors_list[3].append(target_neg)
+                    cur_rec_tensors_list[4].append(answer)
+                    cf_tensors_list[0].append(cf_tensors[0][0])
+                    cf_tensors_list[1].append(cf_tensors[0][1])
+                    seq_class_label_list.append(seq_class_label)
 
-    # data augmentation args
-    parser.add_argument(
-        "--base_augment_type",
-        default="reorder",
-        type=str,
-        help="data augmentation types. Chosen from mask, crop, reorder, random.",
-    )
-    # model args
-    parser.add_argument("--model_name", default="ICLRec", type=str)
-    parser.add_argument("--hidden_size", type=int, default=64, help="hidden size of transformer model")
-    parser.add_argument("--num_hidden_layers", type=int, default=2, help="number of layers")
-    parser.add_argument("--num_attention_heads", default=2, type=int)
-    parser.add_argument("--hidden_act", default="gelu", type=str)  # gelu relu
-    parser.add_argument("--attention_probs_dropout_prob", type=float, default=0.5, help="attention dropout p")
-    parser.add_argument("--hidden_dropout_prob", type=float, default=0.5, help="hidden dropout p")
-    parser.add_argument("--initializer_range", type=float, default=0.02)
-    parser.add_argument("--max_seq_length", default=50, type=int)
+            cur_rec_tensors_list = [self._pack(_) for _ in cur_rec_tensors_list]
+            cf_tensors_list = [self._pack(_) for _ in cf_tensors_list]
+            seq_class_label_list = self._pack(seq_class_label_list)
+            yield cur_rec_tensors_list, cf_tensors_list, seq_class_label_list
 
-    # train args
-    parser.add_argument("--lr", type=float, default=0.001, help="learning rate of adam")
-    parser.add_argument("--batch_size", type=int, default=2, help="number of batch_size")
-    parser.add_argument("--epochs", type=int, default=200, help="number of epochs")
-    parser.add_argument("--no_cuda", action="store_true")
-    parser.add_argument("--log_freq", type=int, default=1, help="per epoch print res")
-    parser.add_argument("--seed", default=42, type=int)
-    ## contrastive learning related
-    parser.add_argument("--temperature", default=1.0, type=float, help="softmax temperature (default:  1.0)")
-    parser.add_argument(
-        "--n_views", default=2, type=int, metavar="N", help="Number of augmented data for each sequence"
-    )
-    parser.add_argument("--cf_weight", type=float, default=0.2, help="weight of contrastive learning task")
-    parser.add_argument("--rec_weight", type=float, default=1.0, help="weight of contrastive learning task")
-
-    # learning related
-    parser.add_argument("--weight_decay", type=float, default=0.0, help="weight_decay of adam")
-    parser.add_argument("--adam_beta1", type=float, default=0.9, help="adam first beta value")
-    parser.add_argument("--adam_beta2", type=float, default=0.999, help="adam second beta value")
-    parser.add_argument("--gpu_id", type=str, default="0", help="gpu_id")
-
-    args = parser.parse_args()
-    set_seed(args.seed)
-    args.data_file = args.data_dir + args.data_name + ".txt"
-    user_seq, max_item, valid_rating_matrix, test_rating_matrix = get_user_seqs(args.data_file)
-    args.item_size = max_item + 2
-    train_dataset = RecWithContrastiveLearningDataset(args, user_seq, data_type="train")
-    train_sampler = RandomSampler(train_dataset)
-    train_dataloader = DataLoader(train_dataset, sampler=train_sampler, batch_size=1)
-    rec_cf_data_iter = tqdm(enumerate(train_dataloader), total=len(train_dataloader))
-
-    for i, (rec_batch, cf_batch) in rec_cf_data_iter:
-        for j in range(len(rec_batch)):
-            print("tensor ", j, rec_batch[j])
-        print("cf_batch:", cf_batch)
-        if i > 2:
-            break
+    def _pack(self, data):
+        return self.stack(data)
