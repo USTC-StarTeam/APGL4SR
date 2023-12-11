@@ -98,12 +98,12 @@ class EarlyStopping:
 
 
 def kmax_pooling(x, dim, k):
-    index = x.topk(k, dim=dim)[1].sort(dim=dim)[0]
+    index = x.topk(k, axis=dim)[1].sort(axis=dim)[0]
     return x.gather(dim, index).squeeze(dim)
 
 
 def avg_pooling(x, dim):
-    return x.sum(dim=dim) / x.shape[dim]
+    return x.sum(axis=dim) / x.shape[dim]
 
 
 def generate_rating_matrix_valid(user_seq, num_users, num_items):

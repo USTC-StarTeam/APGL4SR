@@ -53,7 +53,7 @@ class NCELoss(nn.Cell):
     def __init__(self, temperature, device):
         super(NCELoss, self).__init__()
         self.device = device
-        self.criterion = nn.CrossEntropyLoss()
+        self.criterion = nn.CrossEntropyLoss(ignore_index=-1000000)
         self.temperature = temperature
         self.cossim = nn.CosineSimilarity()
 
@@ -68,21 +68,27 @@ class NCELoss(nn.Cell):
             sim22 = ops.matmul(batch_sample_two, batch_sample_two.T) / temp
             sim12 = ops.matmul(batch_sample_one, batch_sample_two.T) / temp
         d = sim12.shape[-1]
+
+        sim11 = ops.clamp(sim11, -10, 10)
+        sim12 = ops.clamp(sim12, -10, 10)
+
         # avoid contrast against positive intents
         if intent_ids is not None:
             raise NotImplementedError
         else:
-            mask = ops.eye(d, dtype=mindspore.int64)
-            sim11[mask == 1] = float("-inf")
-            sim22[mask == 1] = float("-inf")
+            mask = ops.eye(d, dtype=mindspore.int32)
+            sim11[mask == 1] = -1000000
+            sim22[mask == 1] = -1000000
             # sim22 = sim22.masked_fill_(mask, -np.inf)
             # sim11[..., range(d), range(d)] = float('-inf')
             # sim22[..., range(d), range(d)] = float('-inf')
 
-        raw_scores1 = ops.cat([sim12, sim11], dim=-1)
-        raw_scores2 = ops.cat([sim22, sim12.transpose(-1, -2)], dim=-1)
-        logits = ops.cat([raw_scores1, raw_scores2], dim=-2)
-        labels = ops.arange(2 * d, dtype=mindspore.int64)
+        op = ops.Concat(-1)
+        raw_scores1 = op([sim12, sim11])
+        raw_scores2 = op([sim22, sim12.transpose(1, 0)])
+        op = ops.Concat(-2)
+        logits = op([raw_scores1, raw_scores2])
+        labels = ops.arange(2 * d, dtype=mindspore.int32)
         nce_loss = self.criterion(logits, labels)
         return nce_loss
 
@@ -138,7 +144,7 @@ class Embeddings(nn.Cell):
 
     def construct(self, input_ids):
         seq_length = input_ids.shape[1]
-        position_ids = ops.arange(seq_length, dtype=mindspore.int64)
+        position_ids = ops.arange(seq_length, dtype=mindspore.int32)
         position_ids = position_ids.unsqueeze(0).expand_as(input_ids)
         items_embeddings = self.item_embeddings(input_ids)
         position_embeddings = self.position_embeddings(position_ids)

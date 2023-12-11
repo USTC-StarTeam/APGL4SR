@@ -294,11 +294,23 @@ class MyDataloader():
                     cf_tensors_list[0].append(cf_tensors[0][0])
                     cf_tensors_list[1].append(cf_tensors[0][1])
                     seq_class_label_list.append(seq_class_label)
+                else:
+                    cur_rec_tensors = self.dataset[idx]
+                    user_id, input_ids, target_pos, target_neg, answer = cur_rec_tensors
+                    cur_rec_tensors_list[0].append(user_id)
+                    cur_rec_tensors_list[1].append(input_ids)
+                    cur_rec_tensors_list[2].append(target_pos)
+                    cur_rec_tensors_list[3].append(target_neg)
+                    cur_rec_tensors_list[4].append(answer)
 
-            cur_rec_tensors_list = [self._pack(_) for _ in cur_rec_tensors_list]
-            cf_tensors_list = [self._pack(_) for _ in cf_tensors_list]
-            seq_class_label_list = self._pack(seq_class_label_list)
-            yield cur_rec_tensors_list, cf_tensors_list, seq_class_label_list
+            if self.data_type == 'train':
+                cur_rec_tensors_list = [self._pack(_) for _ in cur_rec_tensors_list]
+                cf_tensors_list = [self._pack(_) for _ in cf_tensors_list]
+                seq_class_label_list = self._pack(seq_class_label_list)
+                yield cur_rec_tensors_list, cf_tensors_list, seq_class_label_list
+            else:
+                cur_rec_tensors_list = [self._pack(_) for _ in cur_rec_tensors_list]
+                yield cur_rec_tensors_list
 
     def _pack(self, data):
         return self.stack(data)

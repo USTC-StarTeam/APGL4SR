@@ -148,7 +148,7 @@ def main():
 
     args.cuda_condition = True
     print("Using Cuda:", args.gpu_id)
-    mindspore.set_context(device_id=int(args.gpu_id), device_target='GPU')
+    mindspore.set_context(device_target='GPU')
     args.data_file = args.data_dir + args.data_name + ".txt"
 
     user_seq, max_item, valid_rating_matrix, test_rating_matrix = get_user_seqs(args.data_file)
@@ -171,7 +171,7 @@ def main():
     args.train_matrix = valid_rating_matrix
 
     # save model
-    checkpoint = args_str + ".pt"
+    checkpoint = args_str
     args.checkpoint_path = os.path.join(args.output_dir, checkpoint)
 
     # training data for node classification
@@ -191,10 +191,10 @@ def main():
     train_dataloader = MyDataloader(args, train_dataset, 'train')
 
     eval_dataset = RecWithContrastiveLearningDataset(args, user_seq, data_type="valid")
-    eval_dataloader = GeneratorDataset(eval_dataset, column_names=['test'])
+    eval_dataloader = MyDataloader(args, eval_dataset, 'valid')
 
     test_dataset = RecWithContrastiveLearningDataset(args, user_seq, data_type="test")
-    test_dataloader = GeneratorDataset(test_dataset, column_names=['test'])
+    test_dataloader = MyDataloader(args, test_dataset, 'test')
 
     model = SASRecModel(args=args)
     model.global_graph_construction(train_dataset)
@@ -226,7 +226,7 @@ def main():
         trainer.args.train_matrix = test_rating_matrix
         print("---------------Change to test_rating_matrix!-------------------")
         # load the best model
-        mindspore.load_param_into_net(trainer.model, mindspore.load_checkpoint(args.checkpoint_path))
+        mindspore.load_param_into_net(trainer.model, mindspore.load_checkpoint(args.checkpoint_path + '.ckpt'))
         scores, result_info = trainer.test(0, full_sort=True)
 
     print(args_str)

@@ -33,24 +33,6 @@ class Trainer:
 
         self.num_intent_clusters = [int(i) for i in self.args.num_intent_clusters.split(",")]
         self.clusters = []
-        for num_intent_cluster in self.num_intent_clusters:
-            # initialize Kmeans
-            if self.args.seq_representation_type == "mean":
-                cluster = KMeans(
-                    num_cluster=num_intent_cluster,
-                    seed=self.args.seed,
-                    hidden_size=self.args.hidden_size,
-                    gpu_id=self.args.gpu_id,
-                )
-                self.clusters.append(cluster)
-            else:
-                cluster = KMeans(
-                    num_cluster=num_intent_cluster,
-                    seed=self.args.seed,
-                    hidden_size=self.args.hidden_size * self.args.max_seq_length,
-                    gpu_id=self.args.gpu_id,
-                )
-                self.clusters.append(cluster)
 
         self.total_augmentaion_pairs = nCr(self.args.n_views, 2)
         # Setting the train and test data loader
@@ -137,7 +119,8 @@ class Trainer:
         mindspore.save_checkpoint(self.model, file_name)
 
     def load(self, file_name):
-        mindspore.load_param_into_net(self.model, mindspore.load_checkpoint(file_name))
+        print(file_name)
+        mindspore.load_param_into_net(self.model, mindspore.load_checkpoint(file_name + '.ckpt'))
 
     def binary_cross_entropy(self, seq_out, pos_ids, neg_ids):
         # [batch seq_len hidden_size]
@@ -166,9 +149,9 @@ class Trainer:
 
     def predict_full(self, seq_out):
         # [item_num hidden_size]
-        test_item_emb = self.model.item_embeddings.weight
+        test_item_emb = self.model.item_embeddings.embedding_table.data
         # [batch hidden_size ]
-        rating_pred = ops.matmul(seq_out, test_item_emb.transpose(0, 1))
+        rating_pred = ops.matmul(seq_out, test_item_emb.transpose(1, 0))
         return rating_pred
 
 
@@ -179,13 +162,13 @@ class ICLRecTrainer(Trainer):
         )
 
     def _gsl_contrastive_learning(self, item_ids):
-        item_ids = ops.unique(item_ids) - 1
+        item_ids = ops.unique(item_ids)[0] - 1
         if item_ids[0] == -1: # Remove mask item
             item_ids = item_ids[1:]
         item_all_vec1 = self.model.get_gnn_embeddings()
         item_all_vec2 = self.model.get_gnn_embeddings(noise=False)
-        item_all_vec1 = ops.L2Normalize(item_all_vec1[item_ids])
-        item_all_vec2 = ops.L2Normalize(item_all_vec2[item_ids])
+        item_all_vec1 = ops.L2Normalize(axis=-1)(item_all_vec1[item_ids])
+        item_all_vec2 = ops.L2Normalize(axis=-1)(item_all_vec2[item_ids])
         cl_loss = self.cf_criterion(item_all_vec1, item_all_vec2, temp=self.args.graph_temp)
         return cl_loss
 
@@ -194,12 +177,10 @@ class ICLRecTrainer(Trainer):
         contrastive learning given one pair sequences (batch)
         inputs: [batch1_augmented_data, batch2_augmentated_data]
         """
-        cl_batch = ops.cat(inputs, dim=0)
-        cl_batch = cl_batch
+        cl_batch = ops.Concat()(inputs)
         cl_sequence_output = self.model(cl_batch, user_ids)
-        # cf_sequence_output = cf_sequence_output[:, -1, :]
         if self.args.seq_representation_instancecl_type == "mean":
-            cl_sequence_output = ops.mean(cl_sequence_output, dim=1, keep_dims=False)
+            cl_sequence_output = ops.mean(cl_sequence_output, axis=1, keep_dims=False)
         cl_sequence_flatten = cl_sequence_output.view(cl_batch.shape[0], -1)
         batch_size = cl_batch.shape[0] // 2
         cl_output_slice = ops.split(cl_sequence_flatten, batch_size)
@@ -216,11 +197,11 @@ class ICLRecTrainer(Trainer):
         intents: [num_clusters batch_size hidden_dims]
         """
         n_views, (bsz, seq_len) = len(inputs), inputs[0].shape
-        cl_batch = ops.cat(inputs, dim=0)
+        cl_batch = ops.Concat()(inputs)
         cl_batch = cl_batch
         cl_sequence_output = self.model(cl_batch)
         if self.args.seq_representation_type == "mean":
-            cl_sequence_output = ops.mean(cl_sequence_output, dim=1, keep_dims=False)
+            cl_sequence_output = ops.mean(cl_sequence_output, axis=1, keep_dims=False)
         cl_sequence_flatten = cl_sequence_output.view(cl_batch.shape[0], -1)
         cl_output_slice = ops.split(cl_sequence_flatten, bsz)
         if self.args.de_noise:
@@ -229,7 +210,7 @@ class ICLRecTrainer(Trainer):
             cl_loss = self.pcl_criterion(cl_output_slice[0], cl_output_slice[1], intents=intents, intent_ids=None)
         return cl_loss
 
-    def eval_interation(self, epoch, dataloader, cluster_dataloader=None, full_sort=True, train=False):
+    def eval_iteration(self, epoch, dataloader, cluster_dataloader=None, full_sort=True, train=False):
 
         # Setting the tqdm progress bar
         rec_data_iter = tqdm(enumerate(dataloader), total=len(dataloader))
@@ -250,8 +231,8 @@ class ICLRecTrainer(Trainer):
 
                 rating_pred = self.predict_full(recommend_output)
 
-                rating_pred = rating_pred.cpu().data.numpy().copy()
-                batch_user_index = user_ids.cpu().numpy()
+                rating_pred = rating_pred.numpy().copy()
+                batch_user_index = user_ids.numpy()
                 rating_pred[self.args.train_matrix[batch_user_index].toarray() > 0] = 0
                 # reference: https://stackoverflow.com/a/23734295, https://stackoverflow.com/a/20104162
                 # argpartition T: O(n)  argsort O(nlogn)
@@ -262,10 +243,10 @@ class ICLRecTrainer(Trainer):
 
                 if i == 0:
                     pred_list = batch_pred_list
-                    answer_list = answers.cpu().data.numpy()
+                    answer_list = answers.numpy()
                 else:
                     pred_list = np.append(pred_list, batch_pred_list, axis=0)
-                    answer_list = np.append(answer_list, answers.cpu().data.numpy(), axis=0)
+                    answer_list = np.append(answer_list, answers.numpy(), axis=0)
             return self.get_full_sort_score(epoch, answer_list, pred_list)
 
         else:
@@ -273,11 +254,12 @@ class ICLRecTrainer(Trainer):
                 batch = tuple(t for t in batch)
                 user_ids, input_ids, target_pos, target_neg, answers, sample_negs = batch
                 recommend_output = self.model.finetune(input_ids, user_ids)
-                test_neg_items = ops.cat((answers, sample_negs), -1)
+                op = ops.Concat(-1)
+                test_neg_items = op(answers, sample_negs)
                 recommend_output = recommend_output[:, -1, :]
 
                 test_logits = self.predict_sample(recommend_output, test_neg_items)
-                test_logits = test_logits.cpu().detach().numpy().copy()
+                test_logits = test_logits.numpy().copy()
                 if i == 0:
                     pred_list = test_logits
                 else:
@@ -301,22 +283,10 @@ class ICLRecTrainer(Trainer):
 
         # ---------- contrastive learning task -------------#
         cl_losses = []
-        for cl_batch in cl_batches:
-            if self.args.contrast_type == "Hybrid":
-                if epoch < self.args.warm_up_epoches:
-                    cl_loss1 = self._instance_cl_one_pair_contrastive_learning(
-                        cl_batch, intent_ids=seq_class_label_batches
-                    )
-                    cl_losses.append(self.args.cf_weight * cl_loss1)
-                else:
-                    cl_loss1 = self._instance_cl_one_pair_contrastive_learning(
-                        cl_batch, intent_ids=seq_class_label_batches, user_ids=user_ids
-                    )
-                    cl_losses.append(self.args.cf_weight * cl_loss1)
-                    if self.args.seq_representation_type == "mean":
-                        sequence_output = ops.mean(sequence_output, dim=1, keep_dims=False)
-                    sequence_output = sequence_output.view(sequence_output.shape[0], -1)
-                    sequence_output = sequence_output.detach().cpu().numpy()
+        cl_loss1 = self._instance_cl_one_pair_contrastive_learning(
+            cl_batches, intent_ids=seq_class_label_batches, user_ids=user_ids
+        )
+        cl_losses.append(self.args.cf_weight * cl_loss1)
 
         # graph contrastive loss
         if self.args.gcl_weight > 0:

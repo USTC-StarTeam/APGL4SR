@@ -176,11 +176,11 @@ class SASRecModel(nn.Cell):
         self.real_V = V
 
     def get_gnn_embeddings(self, noise=True):
-        self.norm_adj = self.norm_adj
+        norm_adj = self.norm_adj.to_dense()
         if noise:
-            US = ops.csr_mm(self.norm_adj, self.US.weight.T)
-            V = ops.csr_mm(self.norm_adj, self.V.weight.T)
-        emb = self.item_embeddings.weight[1:-1]
+            US = ops.matmul(norm_adj, self.US.weight.T)
+            V = ops.matmul(norm_adj, self.V.weight.T)
+        emb = self.item_embeddings.embedding_table.data[1:-1]
         emb_list = [emb]
         for idx in range(self.args.gnn_layers):
             if noise:
@@ -188,12 +188,12 @@ class SASRecModel(nn.Cell):
                     self.real_US, self.real_V = self.real_US, self.real_V
                     emb = self.real_US @ (self.real_V.T @ emb)
                 else:
-                    emb = ops.csr_mm(self.norm_adj, emb)
+                    emb = ops.matmul(norm_adj, emb)
                     emb = emb + self.args.graph_noise * US @ (V.T @ emb)
             else:
-                emb = ops.csr_mm(self.norm_adj, emb)
+                emb = ops.matmul(norm_adj, emb)
             emb_list.append(emb)
-        emb = ops.stack(emb_list, dim=1).mean(1)
+        emb = ops.stack(emb_list, axis=1).mean(1)
         return emb
     
     # Positional Embedding
@@ -202,7 +202,7 @@ class SASRecModel(nn.Cell):
 
         seq_length = sequence.shape[1]
 
-        position_ids = ops.arange(seq_length, dtype=mindspore.int64)
+        position_ids = ops.arange(seq_length, dtype=mindspore.int32)
         position_ids = position_ids.unsqueeze(0).expand_as(sequence)
         item_embeddings = self.item_embeddings(sequence)
         position_embeddings = self.position_embeddings(position_ids)
@@ -233,8 +233,6 @@ class SASRecModel(nn.Cell):
         sequence_emb = self.add_position_embedding(input_ids, user_ids)
         if self.args.att_bias and user_ids != None:
             row, col = ops.repeat_interleave(input_ids, max_len, axis=-1).flatten(), ops.repeat_elements(input_ids, max_len, axis=-1).flatten()
-            self.norm_adj = self.norm_adj
-            self.dense_norm_adj = self.dense_norm_adj
             g = self.dense_norm_adj
             att_bias = g[row - 1, col - 1].reshape(input_ids.shape[0], 1, max_len, max_len) # item 0 will get a wrong emb, but it will be masked
             if self.args.gsl_weight:
@@ -245,7 +243,7 @@ class SASRecModel(nn.Cell):
                 att_bias = att_bias + self.args.graph_noise * g_gsl
             user_weight = self.adaption_layer(self.user_embeddings(user_ids)).unsqueeze(-1).unsqueeze(-1)
             if input_ids.shape[0] == 2 * user_ids.shape[0]: # for aug
-                user_weight = user_weight.repeat(2, 1, 1, 1)
+                user_weight = user_weight.repeat(2, axis=0)
             att_bias = self.args.att_bias * user_weight * att_bias
         else:
             att_bias = None
@@ -254,8 +252,9 @@ class SASRecModel(nn.Cell):
         sequence_output = item_encoded_layers[-1]
         if self.args.fuse:
             graph_emb = self.get_gnn_embeddings(noise=False)
-            sequence_output = self.fuse_layer(ops.cat([sequence_output, graph_emb[input_ids - 1]], dim=-1))
+            sequence_output = self.fuse_layer(ops.cat([sequence_output, graph_emb[input_ids - 1]], axis=-1))
             att_bias = None
+        
         return sequence_output
 
     def init_weights(self, module):
