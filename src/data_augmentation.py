@@ -6,12 +6,8 @@
 #
 import random
 import copy
-import itertools
-from typing import Any
-import mindspore
-import numpy as np
 
-class Random(object):
+class Random():
     """Randomly pick one data augmentation type every time call"""
 
     def __init__(self, tao=0.2, gamma=0.7, beta=0.2):
@@ -25,7 +21,7 @@ class Random(object):
         # print(augment_method.__class__.__name__) # debug usage
         return augment_method(sequence)
 
-class Crop(object):
+class Crop():
     """Randomly crop a subseq from the original sequence"""
 
     def __init__(self, tao=0.2):
@@ -44,7 +40,7 @@ class Crop(object):
             return cropped_seq
 
 
-class Mask(object):
+class Mask():
     """Randomly mask k items given a sequence"""
 
     def __init__(self, gamma=0.7):
@@ -61,7 +57,7 @@ class Mask(object):
         return copied_sequence
 
 
-class Reorder(object):
+class Reorder():
     """Randomly shuffle a continuous sub-sequence"""
 
     def __init__(self, beta=0.2):

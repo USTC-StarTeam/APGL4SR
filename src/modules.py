@@ -6,8 +6,6 @@
 # For full license text, see the LICENSE file in the repo root or https://opensource.org/licenses/BSD-3-Clause
 #
 
-import numpy as np
-
 import copy
 import math
 import mindspore

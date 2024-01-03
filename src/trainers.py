@@ -9,17 +9,14 @@
 
 import numpy as np
 from tqdm import tqdm
-import random
 
 import mindspore
 import mindspore.nn as nn
 import mindspore.ops as ops
 
 
-from models import KMeans
-from datasets import RecWithContrastiveLearningDataset
 from modules import NCELoss, PCLoss
-from utils import recall_at_k, ndcg_k, get_metric, get_user_seqs, nCr
+from utils import recall_at_k, ndcg_k, get_metric, nCr
 
 
 class Trainer:
@@ -56,13 +53,13 @@ class Trainer:
         self.cf_criterion = NCELoss(self.args.temperature, self.device)
         self.pcl_criterion = PCLoss(self.args.temperature, self.device)
 
-    def train_step(self):
+    def train_step(self, epoch, rec_batch, cl_batches, seq_class_label_batches):
         raise NotImplementedError
 
-    def train_iteration(epoch):
+    def train_iteration(self, epoch, dataloader, cluster_dataloader=None, full_sort=True, train=True):
         raise NotImplementedError
     
-    def eval_iteration(epoch):
+    def eval_iteration(self, epoch, dataloader, cluster_dataloader=None, full_sort=True, train=False):
         raise NotImplementedError
 
     def train(self, epoch):
@@ -92,7 +89,7 @@ class Trainer:
             "MRR": "{:.4f}".format(MRR),
         }
         print(post_fix)
-        with open(self.args.log_file, "a") as f:
+        with open(self.args.log_file, "a", encoding='utf-8') as f:
             f.write(str(post_fix) + "\n")
         return [HIT_1, NDCG_1, HIT_5, NDCG_5, HIT_10, NDCG_10, MRR], str(post_fix)
 
@@ -111,7 +108,7 @@ class Trainer:
             "NDCG@20": "{:.4f}".format(ndcg[3]),
         }
         print(post_fix)
-        with open(self.args.log_file, "a") as f:
+        with open(self.args.log_file, "a", encoding='utf-8') as f:
             f.write(str(post_fix) + "\n")
         return [recall[0], ndcg[0], recall[1], ndcg[1], recall[3], ndcg[3]], str(post_fix)
 
@@ -133,9 +130,9 @@ class Trainer:
         pos_logits = ops.sum(pos * seq_emb, -1)  # [batch*seq_len]
         neg_logits = ops.sum(neg * seq_emb, -1)
         istarget = (pos_ids > 0).view(pos_ids.shape[0] * self.model.args.max_seq_length).float()  # [batch*seq_len]
-        loss = ops.sum(
-            -ops.log(ops.sigmoid(pos_logits) + 1e-24) * istarget
-            - ops.log(1 - ops.sigmoid(neg_logits) + 1e-24) * istarget
+        loss = - ops.sum(
+            ops.log(ops.sigmoid(pos_logits) + 1e-24) * istarget
+            + ops.log(1 - ops.sigmoid(neg_logits) + 1e-24) * istarget
         ) / ops.sum(istarget)
 
         return loss
@@ -156,10 +153,6 @@ class Trainer:
 
 
 class ICLRecTrainer(Trainer):
-    def __init__(self, model, train_dataloader, cluster_dataloader, eval_dataloader, test_dataloader, args):
-        super(ICLRecTrainer, self).__init__(
-            model, train_dataloader, cluster_dataloader, eval_dataloader, test_dataloader, args
-        )
 
     def _gsl_contrastive_learning(self, item_ids):
         item_ids = ops.unique(item_ids)[0] - 1
@@ -172,7 +165,9 @@ class ICLRecTrainer(Trainer):
         cl_loss = self.cf_criterion(item_all_vec1, item_all_vec2, temp=self.args.graph_temp)
         return cl_loss
 
-    def _instance_cl_one_pair_contrastive_learning(self, inputs, intent_ids=None, temp=None, user_ids=None):
+    def _instance_cl_one_pair_contrastive_learning(
+            self, inputs, intent_ids=None, temp=None, user_ids=None
+        ):
         """
         contrastive learning given one pair sequences (batch)
         inputs: [batch1_augmented_data, batch2_augmentated_data]
@@ -196,9 +191,8 @@ class ICLRecTrainer(Trainer):
         inputs: [batch1_augmented_data, batch2_augmentated_data]
         intents: [num_clusters batch_size hidden_dims]
         """
-        n_views, (bsz, seq_len) = len(inputs), inputs[0].shape
+        _, (bsz, _) = len(inputs), inputs[0].shape
         cl_batch = ops.Concat()(inputs)
-        cl_batch = cl_batch
         cl_sequence_output = self.model(cl_batch)
         if self.args.seq_representation_type == "mean":
             cl_sequence_output = ops.mean(cl_sequence_output, axis=1, keep_dims=False)
@@ -223,7 +217,7 @@ class ICLRecTrainer(Trainer):
             for i, batch in rec_data_iter:
                 # 0. batch_data will be sent into the device(GPU or cpu)
                 batch = tuple(t for t in batch)
-                user_ids, input_ids, target_pos, target_neg, answers = batch
+                user_ids, input_ids, _, _, answers = batch
                 recommend_output = self.model(input_ids, user_ids)
 
                 recommend_output = recommend_output[:, -1, :]
@@ -252,7 +246,7 @@ class ICLRecTrainer(Trainer):
         else:
             for i, batch in rec_data_iter:
                 batch = tuple(t for t in batch)
-                user_ids, input_ids, target_pos, target_neg, answers, sample_negs = batch
+                user_ids, input_ids, _, _, answers, sample_negs = batch
                 recommend_output = self.model.finetune(input_ids, user_ids)
                 op = ops.Concat(-1)
                 test_neg_items = op(answers, sample_negs)
@@ -298,26 +292,27 @@ class ICLRecTrainer(Trainer):
             joint_loss += cl_loss
         return joint_loss, rec_loss, cl_losses
 
-    def train_iteration(self, epoch, dataloader, cluster_dataloader=None, full_sort=True, train=True):
-
-        str_code = "train" if train else "test"
+    def train_iteration(
+            self, epoch, dataloader, cluster_dataloader=None, full_sort=True, train=True
+        ):
 
         # Setting the tqdm progress bar
         print("Performing Rec model Training:")
         self.model.set_train()
         rec_avg_loss = 0.0
-        cl_individual_avg_losses = [0.0 for i in range(self.total_augmentaion_pairs)]
         cl_sum_avg_loss = 0.0
         joint_avg_loss = 0.0
 
         print(f"rec dataset length: {len(dataloader)}")
         rec_cf_data_iter = tqdm(enumerate(dataloader), total=len(dataloader))
 
-        for i, (rec_batch, cl_batches, seq_class_label_batches) in rec_cf_data_iter:
-            (joint_loss, rec_loss, cl_losses), grads = self.grad_fn(epoch, rec_batch, cl_batches, seq_class_label_batches)
+        for _, (rec_batch, cl_batches, seq_class_label_batches) in rec_cf_data_iter:
+            (joint_loss, rec_loss, cl_losses), grads = self.grad_fn(
+                epoch, rec_batch, cl_batches, seq_class_label_batches
+            )
             self.optim(grads)
             rec_avg_loss += rec_loss.asnumpy()
-            for i, cl_loss in enumerate(cl_losses):
+            for _, cl_loss in enumerate(cl_losses):
                 cl_sum_avg_loss += cl_loss.asnumpy()
             joint_avg_loss += joint_loss.asnumpy()
             
@@ -330,5 +325,5 @@ class ICLRecTrainer(Trainer):
         if (epoch + 1) % self.args.log_freq == 0:
             print(str(post_fix))
 
-        with open(self.args.log_file, "a") as f:
+        with open(self.args.log_file, "a", encoding='utf-8') as f:
             f.write(str(post_fix) + "\n")

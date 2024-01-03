@@ -8,12 +8,10 @@
 
 import os
 import numpy as np
-import random
 import mindspore
 import mindspore.ops as ops
 import argparse
 
-from mindspore.dataset import GeneratorDataset
 
 from datasets import RecWithContrastiveLearningDataset, MyDataloader
 

@@ -7,9 +7,7 @@
 import random
 import numpy as np
 import mindspore
-from mindspore.dataset import GeneratorDataset
 import mindspore.ops as ops
-import itertools
 
 from data_augmentation import Crop, Mask, Reorder, Random
 from utils import neg_sample, nCr

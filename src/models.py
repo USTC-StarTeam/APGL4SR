@@ -5,12 +5,6 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # For full license text, see the LICENSE file in the repo root or https://opensource.org/licenses/BSD-3-Clause
 #
-import math
-import os
-import pickle
-from tqdm import tqdm
-import random
-import copy
 import numpy as np
 import scipy.sparse as sp
 
@@ -18,11 +12,7 @@ import mindspore
 import mindspore.nn as nn
 import mindspore.ops as ops
 
-import gensim
 import faiss
-
-# from kmeans_pymindspore import kmeans
-import time
 
 from modules import Encoder, LayerNorm
 
